@@ -1,7 +1,10 @@
-import React from 'react';
-import { Container, Box, Button, Stepper, Step, StepLabel, Typography, Paper } from '@mui/material';
-import WizardStep from './components/WizardStep'; // General component for each step's content
-import { WizardProvider, useWizardContext } from './context/WizardContext';
+import React, { useState } from 'react'; // Added useState
+import {
+  Container, Box, Button, Stepper, Step, StepLabel, Typography, Paper, CircularProgress, Alert
+} from '@mui/material'; // Added CircularProgress, Alert
+import WizardStep from './components/WizardStep';
+import { WizardProvider, useWizardContext, WizardFormData } from './context/WizardContext';
+import { generateProposalPdf, saveDraftProposal } from './services/api'; // Import API functions
 
 // Import step components
 import Step1_AppType from './components/steps/Step1_AppType';
@@ -21,21 +24,67 @@ const stepLabels = [
   'Timelines', 'Localization', 'Compliance', 'Costing', 'Resourcing', 'Review'
 ];
 
+// Helper function to trigger file download
+const downloadFile = (blob: Blob, fileName: string) => {
+  const url = window.URL.createObjectURL(blob);
+  const link = document.createElement('a');
+  link.href = url;
+  link.setAttribute('download', fileName);
+  document.body.appendChild(link);
+  link.click();
+  link.parentNode?.removeChild(link);
+  window.URL.revokeObjectURL(url);
+};
+
 const WizardContent: React.FC = () => {
   const { activeStep, setActiveStep, formData, totalSteps } = useWizardContext();
+  const [isLoading, setIsLoading] = useState(false);
+  const [error, setError] = useState<string | null>(null);
+  const [successMessage, setSuccessMessage] = useState<string | null>(null);
 
   const handleNext = () => {
+    setError(null); // Clear error on navigation
+    setSuccessMessage(null);
     setActiveStep((prevActiveStep) => Math.min(prevActiveStep + 1, totalSteps - 1));
   };
 
   const handleBack = () => {
+    setError(null); // Clear error on navigation
+    setSuccessMessage(null);
     setActiveStep((prevActiveStep) => Math.max(prevActiveStep - 1, 0));
   };
 
-  const handleSaveDraft = () => {
-    // Placeholder for save draft functionality
-    console.log("Draft saved:", formData);
-    alert("Draft Saved (check console)!");
+  const handleSaveDraft = async () => {
+    setError(null);
+    setSuccessMessage(null);
+    setIsLoading(true);
+    try {
+      // Type assertion because formData from context is generic 'any' for steps initially
+      const response = await saveDraftProposal(formData as WizardFormData);
+      console.log("Draft saved response:", response);
+      setSuccessMessage(response.message || "Draft saved successfully!");
+      // Potentially update context with draft ID if backend returns one:
+      // if (response.draftId) { setFormData(prev => ({...prev, draftId: response.draftId})) }
+    } catch (err) {
+      setError(err instanceof Error ? err.message : "An unknown error occurred while saving draft.");
+    } finally {
+      setIsLoading(false);
+    }
+  };
+
+  const handleGenerateProposal = async () => {
+    setError(null);
+    setSuccessMessage(null);
+    setIsLoading(true);
+    try {
+      const pdfBlob = await generateProposalPdf(formData as WizardFormData);
+      downloadFile(pdfBlob, 'software_proposal.pdf');
+      setSuccessMessage("Proposal PDF generated and download started!");
+    } catch (err) {
+      setError(err instanceof Error ? err.message : "An unknown error occurred while generating PDF.");
+    } finally {
+      setIsLoading(false);
+    }
   };
 
   const getStepContent = (step: number) => {
@@ -69,6 +118,9 @@ const WizardContent: React.FC = () => {
           ))}
         </Stepper>
 
+        {error && <Alert severity="error" sx={{ mb: 2 }}>{error}</Alert>}
+        {successMessage && <Alert severity="success" sx={{ mb: 2 }}>{successMessage}</Alert>}
+
         <WizardStep>
           {getStepContent(activeStep)}
         </WizardStep>
@@ -76,24 +128,26 @@ const WizardContent: React.FC = () => {
         <Box sx={{ display: 'flex', flexDirection: 'row', pt: 2, mt:3, borderTop: '1px solid #ccc' }}>
           <Button
             color="inherit"
-            disabled={activeStep === 0}
+            disabled={activeStep === 0 || isLoading}
             onClick={handleBack}
             sx={{ mr: 1 }}
           >
             Back
           </Button>
-          <Button onClick={handleSaveDraft} sx={{ mr: 1 }}>
+          <Button onClick={handleSaveDraft} sx={{ mr: 1 }} disabled={isLoading}>
+            {isLoading && activeStep !== totalSteps -1 ? <CircularProgress size={20} sx={{mr:1}}/> : null}
             Save Draft
           </Button>
           <Box sx={{ flex: '1 1 auto' }} />
-          <Button onClick={handleNext} disabled={activeStep === totalSteps - 1}>
+          <Button onClick={handleNext} disabled={activeStep === totalSteps - 1 || isLoading}>
             Next
           </Button>
         </Box>
         {activeStep === totalSteps - 1 && (
           <Box sx={{ display: 'flex', justifyContent: 'flex-end', mt: 2 }}>
-            <Button variant="contained" color="primary">
-              Generate Proposal (Placeholder)
+            <Button variant="contained" color="primary" onClick={handleGenerateProposal} disabled={isLoading}>
+              {isLoading ? <CircularProgress size={24} color="inherit" sx={{mr:1}} /> : null}
+              Generate Proposal
             </Button>
           </Box>
         )}
